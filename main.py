@@ -1,13 +1,19 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import json
 import asyncio
+import uuid
+import socketio
 from agents import ContentAgents
 from brand_ingestion import ingest_brand_guidelines
 
 app = FastAPI(title="SocialAI - Content Intelligence API", version="1.0.0")
+sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
+
+workflows_db: Dict[str, Any] = {}
 
 # CORS middleware
 app.add_middleware(
@@ -55,26 +61,38 @@ class KnowledgeToContentRequest(BaseModel):
 class BrandIngestionRequest(BaseModel):
     url: str
 
-# WebSocket connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
+@sio.event
+async def connect(sid, environ, auth):
+    print(f"Client connected: {sid}")
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+@sio.event
+async def disconnect(sid):
+    print(f"Client disconnected: {sid}")
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+@sio.on('join_workflow')
+async def handle_join(sid, data):
+    workflow_id = data.get('workflow_id')
+    if workflow_id:
+        room = f"room_{workflow_id}"
+        await sio.enter_room(sid, room)
+        await sio.emit('joined', {'room': room}, room=sid)
 
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-manager = ConnectionManager()
+@sio.on('approve_content')
+async def handle_approval(sid, data):
+    workflow_id = data.get('workflow_id')
+    if not workflow_id or workflow_id not in workflows_db:
+        await sio.emit('error', {'message': 'Invalid workflow ID'}, room=sid)
+        return
+        
+    workflow = workflows_db[workflow_id]
+    if workflow['status'] != 'pending_approval':
+        await sio.emit('error', {'message': 'Workflow not awaiting approval'}, room=sid)
+        return
+        
+    workflow['status'] = 'approved'
+    await sio.emit('workflow_update', {'workflow_id': workflow_id, 'status': 'approved'}, room=workflow['room_id'])
+    
+    asyncio.create_task(resume_workflow_pipeline(workflow_id))
 
 # API Endpoints
 
@@ -214,62 +232,101 @@ async def ingest_brand(request: BrandIngestionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# WebSocket endpoint for real-time updates
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+async def run_workflow_pipeline(workflow_id: str):
+    workflow = workflows_db[workflow_id]
+    request_data = workflow['initial_request']
+    room_id = workflow['room_id']
+    
     try:
-        while True:
-            data = await websocket.receive_text()
-            # Echo back or process real-time requests
-            await manager.send_personal_message(f"Received: {data}", websocket)
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-
-# Live orchestration workflow
-@app.post("/orchestrate-workflow")
-async def orchestrate_workflow(request: DraftRequest):
-    """Run the complete content creation workflow"""
-    try:
-        # Step 1: Draft content
+        # Step 1: Draft
+        workflow['status'] = 'drafting'
+        await sio.emit('workflow_update', {'workflow_id': workflow_id, 'status': 'drafting'}, room=room_id)
+        
         draft_result = await ContentAgents.drafting_agent(
-            request.topic, 
-            request.audience, 
-            request.tone, 
-            request.brand_guidelines
+            request_data['topic'], 
+            request_data['audience'], 
+            request_data['tone'], 
+            request_data['brand_guidelines']
         )
         
         if not draft_result["success"]:
-            return {"success": False, "error": "Drafting failed", "step": "draft"}
+            workflow['status'] = 'failed'
+            await sio.emit('workflow_error', {'workflow_id': workflow_id, 'error': 'Drafting failed'}, room=room_id)
+            return
+
+        workflow['content'] = draft_result['content']
+        await sio.emit('step_completed', {'workflow_id': workflow_id, 'step': 'draft', 'result': draft_result}, room=room_id)
         
-        # Step 2: Check compliance
+        # Step 2: Compliance
+        workflow['status'] = 'checking_compliance'
+        await sio.emit('workflow_update', {'workflow_id': workflow_id, 'status': 'checking_compliance'}, room=room_id)
+        
         compliance_result = await ContentAgents.compliance_agent(
-            draft_result["content"], 
-            request.brand_guidelines
+            workflow['content'], 
+            request_data['brand_guidelines']
         )
         
-        # Broadcast progress via WebSocket
-        await manager.broadcast(json.dumps({
-            "step": "draft_completed",
-            "content": draft_result["content"]
-        }))
+        await sio.emit('step_completed', {'workflow_id': workflow_id, 'step': 'compliance', 'result': compliance_result}, room=room_id)
         
-        await manager.broadcast(json.dumps({
-            "step": "compliance_completed",
-            "result": compliance_result
-        }))
-        
-        return {
-            "success": True,
-            "workflow": {
-                "draft": draft_result,
-                "compliance": compliance_result
-            }
-        }
+        # Pause for Human Approval
+        workflow['status'] = 'pending_approval'
+        await sio.emit('workflow_update', {'workflow_id': workflow_id, 'status': 'pending_approval'}, room=room_id)
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        workflow['status'] = 'failed'
+        await sio.emit('workflow_error', {'workflow_id': workflow_id, 'error': str(e)}, room=room_id)
+
+
+async def resume_workflow_pipeline(workflow_id: str):
+    workflow = workflows_db[workflow_id]
+    room_id = workflow['room_id']
+    content = workflow.get('content', '')
+    
+    try:
+        # Step 3: Localization (Default to es and Spain for demonstration)
+        workflow['status'] = 'localizing'
+        await sio.emit('workflow_update', {'workflow_id': workflow_id, 'status': 'localizing'}, room=room_id)
+        
+        local_result = await ContentAgents.localization_agent(content, "es", "Spain")
+        await sio.emit('step_completed', {'workflow_id': workflow_id, 'step': 'localization', 'result': local_result}, room=room_id)
+        
+        # Step 4: Distribution (Default to LinkedIn)
+        workflow['status'] = 'distributing'
+        await sio.emit('workflow_update', {'workflow_id': workflow_id, 'status': 'distributing'}, room=room_id)
+        
+        dist_result = await ContentAgents.distribution_agent(local_result['content'], "LinkedIn")
+        await sio.emit('step_completed', {'workflow_id': workflow_id, 'step': 'distribution', 'result': dist_result}, room=room_id)
+        
+        workflow['status'] = 'completed'
+        await sio.emit('workflow_update', {'workflow_id': workflow_id, 'status': 'completed'}, room=room_id)
+        
+    except Exception as e:
+        workflow['status'] = 'failed'
+        await sio.emit('workflow_error', {'workflow_id': workflow_id, 'error': str(e)}, room=room_id)
+
+
+# Live orchestration workflow
+@app.post("/orchestrate-workflow")
+async def orchestrate_workflow(request: DraftRequest, background_tasks: BackgroundTasks):
+    """Start the complete content creation workflow"""
+    workflow_id = str(uuid.uuid4())
+    
+    workflows_db[workflow_id] = {
+        'id': workflow_id,
+        'status': 'initialized',
+        'initial_request': request.model_dump(),
+        'room_id': f"room_{workflow_id}"
+    }
+    
+    background_tasks.add_task(run_workflow_pipeline, workflow_id)
+    
+    return {
+        "success": True,
+        "workflow_id": workflow_id,
+        "message": "Workflow started. Connect via Socket.io and join room_id to receive updates.",
+        "room_id": workflows_db[workflow_id]['room_id']
+    }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(socket_app, host="0.0.0.0", port=8001)
