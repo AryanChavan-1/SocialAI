@@ -54,22 +54,9 @@ A real-time, event-driven workflow powered by Socket.io that coordinates multipl
 2. **Start Backend**:
    ```bash
    pip install -r requirements.txt
-   python main.py
+   cd 'd:\et-gen\socialai'                                                                         
+   .\production_run.ps1                  
    ```
-
-3. **Start Frontend**:
-   ```bash
-   npm install
-   npm run dev
-   ```
-
-### Docker Deployment
-
-```bash
-docker-compose up --build
-```
-
----
 
 ## 🏗️ Project Structure
 
