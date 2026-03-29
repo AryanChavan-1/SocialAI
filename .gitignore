@@ -39,3 +39,7 @@ test_results.txt
 # Misc
 *.log
 npm-debug.log*
+
+# Database
+*.db
+data/

@@ -1,0 +1,17 @@
+node_modules
+.next
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+*.md
+test_*.py
+test_*.txt
+.env
+.env.local
+.env*.local
+*.db
+Dockerfile*
+docker-compose*
+.dockerignore

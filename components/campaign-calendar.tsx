@@ -1,9 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Filter, Clock, Zap, Loader2, Send, Globe, LinkIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Filter, Clock, Zap, Loader2, Send, Globe, LinkIcon, Calendar } from 'lucide-react'
 
-const API_BASE = 'http://localhost:8001'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
 interface ContentBlock {
   id: string
@@ -52,12 +52,16 @@ const generateCalendarData = (): ContentBlock[] => {
 
 export function CampaignCalendar() {
   const [selectedFilter, setSelectedFilter] = useState<string | null>(null)
-  const [contentBlocks, setContentBlocks] = useState(generateCalendarData)
+  const [contentBlocks, setContentBlocks] = useState<ContentBlock[]>([])
   const [selectedBlock, setSelectedBlock] = useState<ContentBlock | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [isDistributing, setIsDistributing] = useState(false)
   const [distributionResult, setDistributionResult] = useState<string | null>(null)
   const [showFilterDropdown, setShowFilterDropdown] = useState(false)
+
+  const loadDemoData = () => {
+    setContentBlocks(generateCalendarData())
+  }
 
   // Brand Guidelines Ingestion
   const [brandUrl, setBrandUrl] = useState('')
@@ -234,6 +238,13 @@ export function CampaignCalendar() {
           </div>
 
           <button
+            onClick={loadDemoData}
+            className="px-4 py-2 bg-secondary/10 hover:bg-secondary/20 border border-secondary/30 rounded-lg text-secondary transition-colors text-sm font-medium"
+          >
+            Load Demo Data
+          </button>
+
+          <button
             onClick={() => setShowAddModal(true)}
             className="px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/50 rounded-lg text-primary transition-colors text-sm font-medium"
           >
@@ -243,9 +254,26 @@ export function CampaignCalendar() {
       </div>
 
       {/* Calendar Grid */}
-      <div className="glass rounded-xl p-6 border border-border/20 overflow-x-auto">
-        <div className="min-w-max">
-          {/* Header Row */}
+      <div className="glass rounded-xl p-6 border border-border/20 overflow-x-auto min-h-[400px] relative">
+        {contentBlocks.length === 0 ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 z-10">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+              <Calendar className="w-8 h-8 text-primary" />
+            </div>
+            <h3 className="font-bold text-xl mb-2">No Campaigns Scheduled</h3>
+            <p className="text-muted-foreground mb-6 max-w-sm">
+              Your calendar is currently empty. Click "Load Demo Data" to see a populated schedule, or add a new campaign to get started.
+            </p>
+            <button
+              onClick={loadDemoData}
+              className="px-6 py-2.5 bg-primary/20 hover:bg-primary/30 border border-primary/50 text-primary rounded-lg font-semibold transition-colors"
+            >
+              Load Demo Data
+            </button>
+          </div>
+        ) : (
+          <div className="min-w-max">
+            {/* Header Row */}
           <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: 'auto repeat(7, 1fr)' }}>
             <div className="w-24" />
             {dayLabels.map((day, idx) => (
@@ -290,6 +318,7 @@ export function CampaignCalendar() {
             </div>
           ))}
         </div>
+        )}
       </div>
 
       {/* Selected Block Detail */}

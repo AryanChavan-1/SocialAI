@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Copy, Zap, Loader2, Sparkles, ChevronDown, FileText, ArrowRight } from 'lucide-react'
+import { useAppState } from '@/components/app-state-context'
 
-const API_BASE = 'http://localhost:8001'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
 const channelOptions = ['LinkedIn', 'Twitter', 'Email', 'Blog', 'Instagram']
 
@@ -39,17 +40,31 @@ interface GeneratedAsset {
 }
 
 export function KnowledgeTransformation() {
-  const [sourceText, setSourceText] = useState(defaultSource)
-  const [keywords, setKeywords] = useState<Keyword[]>([])
+  const { state, setAssetData } = useAppState()
+  
+  // Initialize from persisted state or defaults - with safe fallbacks
+  const safeAssets = state?.assets || {}
+  const [sourceText, setSourceText] = useState(safeAssets.sourceContent || defaultSource)
+  const [keywords, setKeywords] = useState<Keyword[]>(safeAssets.extractedKeywords || [])
   const [isExtracting, setIsExtracting] = useState(false)
   const [selectedChannel, setSelectedChannel] = useState('LinkedIn')
   const [targetAudience, setTargetAudience] = useState('Marketing Professionals')
-  const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>([])
+  const [generatedAssets, setGeneratedAssets] = useState<GeneratedAsset[]>(safeAssets.generatedContent || [])
   const [isGenerating, setIsGenerating] = useState(false)
+  const [generationError, setGenerationError] = useState<string | null>(null)
   const [isFormatting, setIsFormatting] = useState(false)
   const [formattedContent, setFormattedContent] = useState('')
   const [selectedAsset, setSelectedAsset] = useState<GeneratedAsset | null>(null)
   const [showDropdown, setShowDropdown] = useState(false)
+
+  // Persist state changes
+  useEffect(() => {
+    setAssetData({
+      sourceContent: sourceText,
+      extractedKeywords: keywords,
+      generatedContent: generatedAssets
+    })
+  }, [sourceText, keywords, generatedAssets, setAssetData])
 
   const extractKeywords = async () => {
     setIsExtracting(true)
@@ -60,11 +75,21 @@ export function KnowledgeTransformation() {
         body: JSON.stringify({ source_text: sourceText }),
       })
       const data = await res.json()
-      if (data.success) {
-        setKeywords(data.keywords)
+      // API returns entities array which we map to keywords
+      if (data.success && data.entities) {
+        const mappedKeywords = data.entities.map((e: any) => ({
+          text: e.text,
+          type: e.type,
+          position_start: 0,
+          position_end: 0
+        }))
+        setKeywords(mappedKeywords)
+      } else {
+        setKeywords([])
       }
     } catch (err) {
       console.error('Keyword extraction failed:', err)
+      setKeywords([])
     } finally {
       setIsExtracting(false)
     }
@@ -72,6 +97,7 @@ export function KnowledgeTransformation() {
 
   const generateContent = async () => {
     setIsGenerating(true)
+    setGenerationError(null)
     try {
       const formatMap: Record<string, string> = {
         LinkedIn: 'Professional Post',
@@ -89,19 +115,25 @@ export function KnowledgeTransformation() {
           target_format: formatMap[selectedChannel] || 'Blog Article',
         }),
       })
+      if (!res.ok) {
+        throw new Error(`Server error: ${res.status}`)
+      }
       const data = await res.json()
-      if (data.success) {
+      if (data.success && data.content) {
         const newAsset: GeneratedAsset = {
           channel: selectedChannel,
           content: data.content,
-          format: data.format,
-          audience: data.audience,
+          format: data.format || formatMap[selectedChannel] || 'Content',
+          audience: data.audience || targetAudience,
         }
         setGeneratedAssets((prev) => [...prev, newAsset])
         setSelectedAsset(newAsset)
+      } else {
+        setGenerationError(data.error || 'Failed to generate content')
       }
     } catch (err) {
       console.error('Content generation failed:', err)
+      setGenerationError(err instanceof Error ? err.message : 'Network error')
     } finally {
       setIsGenerating(false)
     }
@@ -139,38 +171,38 @@ export function KnowledgeTransformation() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold mb-2 gradient-text">Knowledge Transformation</h1>
-        <p className="text-muted-foreground">Transform source content into optimized assets for any channel — powered by AI agents</p>
+        <h1 className="text-3xl font-bold mb-2">Turn Documents Into Content</h1>
+        <p className="text-muted-foreground">Upload a document and create blog posts, social media posts, emails, and more — all automatically.</p>
       </div>
 
       {/* Main Content Split */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Source Content */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Source Content</h2>
+          <h2 className="text-lg font-semibold">Your Document</h2>
           <div className="glass rounded-xl border border-border/20">
             <textarea
               value={sourceText}
               onChange={(e) => setSourceText(e.target.value)}
               className="w-full h-80 p-4 bg-transparent text-sm text-foreground/90 leading-relaxed resize-none focus:outline-none"
-              placeholder="Paste your source content here..."
+              placeholder="Paste your document text here..."
             />
           </div>
           <div className="flex gap-2">
             <button
               onClick={extractKeywords}
               disabled={isExtracting || !sourceText.trim()}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-primary/20 hover:bg-primary/30 border border-primary/50 rounded-lg text-primary transition-colors disabled:opacity-40"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors disabled:opacity-40"
             >
               {isExtracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-              <span className="text-sm">{isExtracting ? 'Extracting...' : 'Extract Keywords'}</span>
+              <span className="text-sm">{isExtracting ? 'Finding topics...' : 'Find Key Topics'}</span>
             </button>
           </div>
 
           {/* Extracted Keywords */}
           {keywords.length > 0 && (
             <div className="glass rounded-xl p-4 border border-border/20">
-              <p className="text-xs text-muted-foreground uppercase mb-3">Extracted Entities ({keywords.length})</p>
+              <p className="text-xs text-muted-foreground uppercase mb-3">Key Topics Found ({keywords.length})</p>
               <div className="flex flex-wrap gap-2">
                 {keywords.map((kw, idx) => (
                   <span
@@ -178,7 +210,6 @@ export function KnowledgeTransformation() {
                     className={`px-2.5 py-1 rounded-full border text-xs font-medium ${getTypeColor(kw.type)}`}
                   >
                     {kw.text}
-                    <span className="ml-1 opacity-60">({kw.type})</span>
                   </span>
                 ))}
               </div>
@@ -189,13 +220,13 @@ export function KnowledgeTransformation() {
         {/* Right: Generation Controls + Output */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Generate Asset</h2>
+            <h2 className="text-lg font-semibold">Create Content</h2>
           </div>
 
           {/* Controls */}
           <div className="glass rounded-xl p-4 border border-border/20 space-y-3">
             <div>
-              <label className="text-xs text-muted-foreground uppercase mb-1 block">Target Audience</label>
+              <label className="text-xs text-muted-foreground uppercase mb-1 block">Who is this for?</label>
               <input
                 type="text"
                 value={targetAudience}
@@ -204,7 +235,7 @@ export function KnowledgeTransformation() {
               />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground uppercase mb-1 block">Channel / Format</label>
+              <label className="text-xs text-muted-foreground uppercase mb-1 block">Where will this be published?</label>
               <div className="relative">
                 <button
                   onClick={() => setShowDropdown(!showDropdown)}
@@ -233,17 +264,20 @@ export function KnowledgeTransformation() {
             <button
               onClick={generateContent}
               disabled={isGenerating || !sourceText.trim()}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-secondary/20 hover:bg-secondary/30 border border-secondary/50 rounded-lg text-secondary transition-colors font-medium disabled:opacity-40"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-secondary hover:bg-secondary/90 text-white rounded-lg transition-colors font-medium disabled:opacity-40"
             >
               {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              <span className="text-sm">{isGenerating ? 'Generating...' : 'Generate Content'}</span>
+              <span className="text-sm">{isGenerating ? 'Creating...' : 'Create Content'}</span>
             </button>
+            {generationError && (
+              <p className="text-xs text-red-400 mt-2">{generationError}</p>
+            )}
           </div>
 
           {/* Generated Assets List */}
           {generatedAssets.length > 0 && (
             <div className="space-y-3">
-              <p className="text-xs text-muted-foreground uppercase">Generated Assets ({generatedAssets.length})</p>
+              <p className="text-xs text-muted-foreground uppercase">Created Content ({generatedAssets.length})</p>
               {generatedAssets.map((asset, idx) => (
                 <button
                   key={idx}
@@ -259,7 +293,20 @@ export function KnowledgeTransformation() {
                         {asset.channel} · {asset.audience}
                       </p>
                     </div>
-                    <Sparkles className="w-4 h-4 text-accent" />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          navigator.clipboard.writeText(asset.content)
+                        }}
+                        className="flex items-center gap-1 px-2 py-1 bg-secondary/80 hover:bg-secondary text-white rounded text-xs font-medium transition-colors"
+                        title="Copy content"
+                      >
+                        <Copy className="w-3 h-3" />
+                        Copy
+                      </button>
+                      <Sparkles className="w-4 h-4 text-accent" />
+                    </div>
                   </div>
                   <p className="text-xs text-foreground/80 line-clamp-2">{asset.content}</p>
                 </button>
@@ -271,22 +318,22 @@ export function KnowledgeTransformation() {
 
       {/* Selected Asset Detail */}
       {selectedAsset && (
-        <div className="glass rounded-xl p-6 border border-primary/30 glow-purple space-y-4">
+        <div className="glass rounded-xl p-6 border border-primary/30 space-y-4">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-xs text-primary uppercase font-semibold mb-2">Generated Asset</p>
+              <p className="text-xs text-primary uppercase font-semibold mb-2">Created Content</p>
               <h3 className="text-xl font-bold">{selectedAsset.format}</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Channel: {selectedAsset.channel} · Audience: {selectedAsset.audience}
+                For: {selectedAsset.channel} · Audience: {selectedAsset.audience}
               </p>
             </div>
             <button
               onClick={() => formatForChannel(selectedAsset.content, selectedAsset.channel)}
               disabled={isFormatting}
-              className="flex items-center gap-2 px-3 py-2 bg-accent/20 hover:bg-accent/30 border border-accent/50 rounded-lg text-accent transition-colors"
+              className="flex items-center gap-2 px-3 py-2 bg-accent hover:bg-accent/90 text-white rounded-lg transition-colors"
             >
               {isFormatting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-              <span className="text-xs font-semibold">Re-format for Channel</span>
+              <span className="text-xs font-semibold">Adjust Format</span>
             </button>
           </div>
 
@@ -296,7 +343,7 @@ export function KnowledgeTransformation() {
 
           {formattedContent && (
             <div className="pt-4 border-t border-border/20">
-              <p className="text-xs text-accent uppercase font-semibold mb-2">Channel-Optimized Version</p>
+              <p className="text-xs text-accent uppercase font-semibold mb-2">Adjusted for {selectedAsset.channel}</p>
               <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap">{formattedContent}</p>
             </div>
           )}
@@ -304,7 +351,7 @@ export function KnowledgeTransformation() {
           <div className="flex gap-2 pt-2">
             <button
               onClick={() => navigator.clipboard.writeText(formattedContent || selectedAsset.content)}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/50 rounded-lg text-secondary transition-colors font-medium text-sm"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/90 text-white rounded-lg transition-colors font-medium text-sm"
             >
               <Copy className="w-4 h-4" />
               <span>Copy</span>

@@ -13,9 +13,11 @@ import {
   ThumbsUp,
   Globe,
   Send,
+  Copy,
 } from 'lucide-react'
+import { useAppState } from '@/components/app-state-context'
 
-const API_BASE = 'http://localhost:8001'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
 type WorkflowStatus =
   | 'idle'
@@ -43,6 +45,8 @@ interface PipelineNode {
 }
 
 export function AgentOrchestration() {
+  const { state, setWorkflowData } = useAppState()
+  
   const [socket, setSocket] = useState<Socket | null>(null)
   const [workflowId, setWorkflowId] = useState<string | null>(null)
   const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatus>('idle')
@@ -77,17 +81,17 @@ export function AgentOrchestration() {
   }
 
   const pipelineNodes: PipelineNode[] = [
-    { id: 'drafting', name: 'Drafting', status: getNodeStatus('drafting'), icon: Activity },
+    { id: 'drafting', name: 'Writing', status: getNodeStatus('drafting'), icon: Activity },
     {
       id: 'checking_compliance',
-      name: 'Compliance',
+      name: 'Checking',
       status: getNodeStatus('checking_compliance'),
       icon: AlertCircle,
     },
-    { id: 'localizing', name: 'Localization', status: getNodeStatus('localizing'), icon: Globe },
+    { id: 'localizing', name: 'Translating', status: getNodeStatus('localizing'), icon: Globe },
     {
       id: 'distributing',
-      name: 'Distribution',
+      name: 'Formatting',
       status: getNodeStatus('distributing'),
       icon: Send,
     },
@@ -219,34 +223,47 @@ export function AgentOrchestration() {
       case 'idle':
         return 'Ready to Start'
       case 'drafting':
-        return 'Drafting Content...'
+        return 'AI is Writing...'
       case 'checking_compliance':
-        return 'Checking Compliance...'
+        return 'Checking Content...'
       case 'pending_approval':
-        return 'Awaiting Approval'
+        return 'Ready for Your Review'
       case 'approved':
         return 'Approved — Continuing...'
       case 'localizing':
-        return 'Localizing Content...'
+        return 'Translating...'
       case 'distributing':
-        return 'Distributing...'
+        return 'Formatting for Publishing...'
       case 'completed':
-        return 'Workflow Complete ✓'
+        return 'All Done ✓'
       case 'failed':
-        return 'Workflow Failed'
+        return 'Something Went Wrong'
       default:
-        return 'Initializing...'
+        return 'Starting...'
     }
   }
+
+  // Persist workflow state changes
+  useEffect(() => {
+    if (workflowId) {
+      setWorkflowData(workflowId, {
+        status: workflowStatus,
+        stepResults,
+        topic,
+        audience,
+        tone
+      })
+    }
+  }, [workflowId, workflowStatus, stepResults, topic, audience, tone, setWorkflowData])
 
   return (
     <div className="space-y-8 relative">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl font-bold mb-2 gradient-text">Agent Orchestration</h1>
+          <h1 className="text-3xl font-bold mb-2">Create New Content</h1>
           <p className="text-muted-foreground">
-            Real-time multi-agent content pipeline with human-in-the-loop approval
+            AI will write, check, translate, and format your content. You review before publishing.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -268,7 +285,7 @@ export function AgentOrchestration() {
 
       {/* Input Form */}
       <div className="glass rounded-xl p-6 border border-border/20 space-y-4">
-        <h2 className="text-lg font-semibold mb-2">Content Brief</h2>
+        <h2 className="text-lg font-semibold mb-2">What do you want to write about?</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="text-xs text-muted-foreground uppercase mb-1 block">Topic</label>
@@ -281,7 +298,7 @@ export function AgentOrchestration() {
             />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground uppercase mb-1 block">Audience</label>
+            <label className="text-xs text-muted-foreground uppercase mb-1 block">Who is this for?</label>
             <input
               type="text"
               value={audience}
@@ -307,20 +324,20 @@ export function AgentOrchestration() {
         <button
           onClick={startWorkflow}
           disabled={isStarting || (workflowStatus !== 'idle' && workflowStatus !== 'completed' && workflowStatus !== 'failed')}
-          className="flex items-center gap-2 px-6 py-2.5 bg-primary/20 hover:bg-primary/30 border border-primary/50 rounded-lg text-primary transition-colors font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 px-6 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-lg font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isStarting ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
             <Play className="w-4 h-4" />
           )}
-          <span>{isStarting ? 'Starting...' : 'Start Workflow'}</span>
+          <span>{isStarting ? 'Starting...' : 'Create Content'}</span>
         </button>
       </div>
 
       {/* Pipeline Visualization */}
       <div className="glass rounded-xl p-8 border border-border/20">
-        <h2 className="text-lg font-semibold mb-6">Pipeline Status</h2>
+        <h2 className="text-lg font-semibold mb-6">Progress</h2>
         <div className="flex items-center justify-between gap-2 max-w-3xl mx-auto">
           {pipelineNodes.map((node, idx) => (
             <div key={node.id} className="flex items-center flex-1">
@@ -356,7 +373,7 @@ export function AgentOrchestration() {
       {/* Step Results Feed */}
       {stepResults.length > 0 && (
         <div className="glass rounded-xl p-6 border border-border/20">
-          <h2 className="text-lg font-semibold mb-4">Agent Activity Log</h2>
+          <h2 className="text-lg font-semibold mb-4">What's Happening</h2>
           <div className="space-y-3 max-h-96 overflow-y-auto">
             {stepResults.map((sr, idx) => (
               <div
@@ -370,12 +387,28 @@ export function AgentOrchestration() {
                     <span className="text-xs text-muted-foreground">{sr.timestamp}</span>
                   </div>
                   {/* Show content preview if available */}
-                  {sr.result && 'content' in sr.result && typeof sr.result.content === 'string' && (
-                    <p className="text-xs text-foreground/70 line-clamp-3">
-                      {sr.result.content.substring(0, 200)}...
-                    </p>
-                  )}
-                  {/* Show compliance status if present */}
+                  {sr.result && 'content' in sr.result && (() => {
+                    const c = String(sr.result.content ?? '')
+                    return c.length > 0 ? (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-muted-foreground">Content Preview:</span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(c)}
+                            className="flex items-center gap-1 px-2 py-0.5 bg-secondary/80 hover:bg-secondary text-white rounded text-xs font-medium transition-colors"
+                            title="Copy content"
+                          >
+                            <Copy className="w-3 h-3" />
+                            Copy
+                          </button>
+                        </div>
+                        <p className="text-xs text-foreground/70 line-clamp-3 bg-muted/30 p-2 rounded">
+                          {c.substring(0, 200)}...
+                        </p>
+                      </div>
+                    ) : null
+                  })()}
+                  {/* Show check status if present */}
                   {sr.result && 'result' in sr.result && sr.result.result && typeof sr.result.result === 'object' && (
                     <div className="mt-1">
                       {(() => {
@@ -389,7 +422,7 @@ export function AgentOrchestration() {
                                 : 'bg-amber-500/20 border-amber-500/50 text-amber-300'
                             }`}
                           >
-                            Compliance: {status.toUpperCase()}
+                            Check: {status.toUpperCase()}
                           </span>
                         )
                       })()}
@@ -405,21 +438,21 @@ export function AgentOrchestration() {
       {/* ROI Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass rounded-xl p-6 border border-border/20">
-          <p className="text-xs text-muted-foreground uppercase mb-2">Workflows Run</p>
-          <p className="text-3xl font-bold gradient-text">
+          <p className="text-xs text-muted-foreground uppercase mb-2">Content Pieces Created</p>
+          <p className="text-3xl font-bold text-primary">
             {workflowStatus === 'completed' ? '1' : '0'}
           </p>
           <p className="text-xs text-muted-foreground mt-2">This session</p>
         </div>
         <div className="glass rounded-xl p-6 border border-border/20">
-          <p className="text-xs text-muted-foreground uppercase mb-2">Pipeline Steps</p>
+          <p className="text-xs text-muted-foreground uppercase mb-2">Steps Completed</p>
           <p className="text-3xl font-bold text-secondary">{stepResults.length}</p>
-          <p className="text-xs text-muted-foreground mt-2">Completed</p>
+          <p className="text-xs text-muted-foreground mt-2">Of 4 total steps</p>
         </div>
         <div className="glass rounded-xl p-6 border border-border/20">
           <p className="text-xs text-muted-foreground uppercase mb-2">Status</p>
           <p className="text-3xl font-bold text-accent">
-            {workflowStatus === 'completed' ? 'Done' : workflowStatus === 'idle' ? 'Ready' : 'Running'}
+            {workflowStatus === 'completed' ? 'Done' : workflowStatus === 'idle' ? 'Ready' : 'In Progress'}
           </p>
           <p className="text-xs text-muted-foreground mt-2">Current</p>
         </div>
@@ -432,17 +465,16 @@ export function AgentOrchestration() {
           <div className="absolute inset-0 bg-black/60 backdrop-blur-glass" />
 
           {/* Modal */}
-          <div className="relative glass rounded-xl p-8 border border-primary/30 max-w-lg w-full glow-purple">
-            <h3 className="text-xl font-bold mb-2">Human Review Required</h3>
+          <div className="relative glass rounded-xl p-8 border border-primary/30 max-w-lg w-full">
+            <h3 className="text-xl font-bold mb-2">Review Your Content</h3>
             <p className="text-sm text-muted-foreground mb-6">
-              The compliance agent has completed its review. Review the results and approve to
-              continue with Localization & Distribution.
+              AI has finished checking your content. Review the results below, then approve to continue with translation and formatting.
             </p>
 
-            {/* Show compliance results */}
+            {/* Show check results */}
             {stepResults.find((s) => s.step === 'compliance') && (
               <div className="glass rounded-lg p-4 bg-amber-500/10 border border-amber-500/30 mb-6 space-y-2">
-                <p className="text-sm font-semibold text-amber-200">Compliance Findings:</p>
+                <p className="text-sm font-semibold text-amber-200">Check Results:</p>
                 {(() => {
                   const complianceResult = stepResults.find((s) => s.step === 'compliance')
                   const result = (complianceResult?.result as Record<string, unknown>)
@@ -476,7 +508,7 @@ export function AgentOrchestration() {
               </button>
               <button
                 onClick={approveContent}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500/20 hover:bg-green-500/30 border border-green-500/50 rounded-lg text-green-300 transition-colors text-sm font-semibold"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500 hover:bg-green-600 rounded-lg text-white transition-colors text-sm font-semibold"
               >
                 <ThumbsUp className="w-4 h-4" />
                 Approve & Continue

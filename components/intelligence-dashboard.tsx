@@ -1,19 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Activity,
   AlertCircle,
   CheckCircle2,
-  Users,
   TrendingUp,
   ChevronRight,
   Loader2,
   Zap,
   Shield,
+  BarChart3
 } from 'lucide-react'
+import { useAppState } from '@/components/app-state-context'
 
-const API_BASE = 'http://localhost:8001'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
 interface Insight {
   pattern: string
@@ -42,10 +43,14 @@ const sampleEngagementData = [
 ]
 
 export function IntelligenceDashboard() {
-  const [insights, setInsights] = useState<Insight[]>([])
+  const { state, setAnalyticsData } = useAppState()
+  
+  // Safe fallback for state.analytics
+  const safeAnalytics = state?.analytics || {}
+  const [insights, setInsights] = useState<Insight[]>(safeAnalytics.insights || [])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [selectedInsight, setSelectedInsight] = useState<Insight | null>(null)
-  const [strategy, setStrategy] = useState<StrategyAction | null>(null)
+  const [strategy, setStrategy] = useState<StrategyAction | null>(safeAnalytics.strategy || null)
   const [isStrategizing, setIsStrategizing] = useState(false)
 
   // Governance
@@ -151,21 +156,30 @@ export function IntelligenceDashboard() {
     }
   }
 
+  // Persist state changes
+  useEffect(() => {
+    setAnalyticsData({
+      insights,
+      strategy,
+      govResult
+    })
+  }, [insights, strategy, govResult, setAnalyticsData])
+
   return (
     <div className="space-y-8">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl font-bold mb-2 gradient-text">Intelligence & Insights</h1>
-          <p className="text-muted-foreground">Analyze engagement, generate strategy, and monitor brand governance</p>
+          <h1 className="text-3xl font-bold mb-2">See What's Working</h1>
+          <p className="text-muted-foreground">Get insights on your content performance and check if content follows your brand guidelines</p>
         </div>
         <button
           onClick={analyzeInsights}
           disabled={isAnalyzing}
-          className="flex items-center gap-2 px-5 py-2.5 bg-primary/20 hover:bg-primary/30 border border-primary/50 rounded-lg text-primary transition-colors font-semibold disabled:opacity-40"
+          className="flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-lg transition-colors font-semibold disabled:opacity-40"
         >
           {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
-          <span>{isAnalyzing ? 'Analyzing...' : 'Analyze Engagement'}</span>
+          <span>{isAnalyzing ? 'Analyzing...' : 'Get Insights'}</span>
         </button>
       </div>
 
@@ -173,10 +187,13 @@ export function IntelligenceDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Activity Log */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Activity Log</h2>
+          <h2 className="text-lg font-semibold">What's Happening</h2>
           <div className="glass rounded-xl p-4 border border-border/20 h-96 overflow-y-auto font-mono text-xs">
             {activityLog.length === 0 ? (
-              <p className="text-muted-foreground text-center mt-8">Run an analysis to see activity...</p>
+              <div className="flex flex-col items-center justify-center h-full text-center px-4 opacity-50">
+                <Activity className="w-8 h-8 mb-3" />
+                <p className="text-muted-foreground">No activity yet. Click "Get Insights" to start analyzing your content.</p>
+              </div>
             ) : (
               <div className="space-y-2.5">
                 {activityLog.map((log, idx) => (
@@ -195,12 +212,23 @@ export function IntelligenceDashboard() {
 
         {/* Middle: Insights + Strategy */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Insights & Strategy</h2>
+          <h2 className="text-lg font-semibold">Insights & Suggestions</h2>
           <div className="glass rounded-xl p-4 border border-border/20 h-96 overflow-y-auto space-y-3">
             {insights.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <TrendingUp className="w-8 h-8 text-muted-foreground/30 mb-3" />
-                <p className="text-sm text-muted-foreground">Click &quot;Analyze Engagement&quot; to discover patterns</p>
+              <div className="flex flex-col items-center justify-center h-full text-center px-4">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                  <BarChart3 className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="font-bold text-lg mb-2">No Insights Yet</h3>
+                <p className="text-xs text-muted-foreground mb-6">
+                  Click "Get Insights" to analyze your content and discover what performs best.
+                </p>
+                <button
+                  onClick={analyzeInsights}
+                  className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-xs font-semibold transition-colors"
+                >
+                  Load Demo Data
+                </button>
               </div>
             ) : (
               insights.map((insight, idx) => (
@@ -217,7 +245,7 @@ export function IntelligenceDashboard() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded-full border text-xs ${getConfidenceColor(insight.confidence)}`}>
-                      {insight.confidence}
+                      {insight.confidence} confidence
                     </span>
                     <span className="text-xs text-muted-foreground truncate">{insight.suggested_action}</span>
                   </div>
@@ -231,7 +259,7 @@ export function IntelligenceDashboard() {
             <div className="glass rounded-lg p-4 border border-accent/30 space-y-2">
               <div className="flex items-center gap-2">
                 <Zap className="w-4 h-4 text-accent" />
-                <p className="text-xs text-accent uppercase font-semibold">Autonomous Action</p>
+                <p className="text-xs text-accent uppercase font-semibold">Suggestion</p>
               </div>
               <p className="text-sm font-semibold">{strategy.description}</p>
               <span className="inline-block px-2 py-0.5 rounded-full bg-accent/20 border border-accent/50 text-accent text-xs">
@@ -244,19 +272,19 @@ export function IntelligenceDashboard() {
 
         {/* Right: Brand Governance */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Brand Governance</h2>
+          <h2 className="text-lg font-semibold">Brand Check</h2>
           <div className="glass rounded-xl p-4 border border-border/20 space-y-3">
             <div>
               <label className="text-xs text-muted-foreground uppercase mb-1 block">Content to Check</label>
               <textarea
                 value={govContent}
                 onChange={(e) => setGovContent(e.target.value)}
-                placeholder="Paste content to check against brand guidelines..."
+                placeholder="Paste your content here to check if it follows your brand guidelines..."
                 className="w-full h-28 px-3 py-2 bg-muted/50 border border-border/30 rounded-lg text-sm text-foreground resize-none focus:outline-none focus:border-primary/50"
               />
             </div>
             <div>
-              <label className="text-xs text-muted-foreground uppercase mb-1 block">Brand Guidelines</label>
+              <label className="text-xs text-muted-foreground uppercase mb-1 block">Your Brand Guidelines</label>
               <textarea
                 value={govGuidelines}
                 onChange={(e) => setGovGuidelines(e.target.value)}
@@ -266,10 +294,10 @@ export function IntelligenceDashboard() {
             <button
               onClick={checkGovernance}
               disabled={isCheckingGov || !govContent.trim()}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-secondary/20 hover:bg-secondary/30 border border-secondary/50 rounded-lg text-secondary transition-colors font-medium disabled:opacity-40"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-secondary hover:bg-secondary/90 text-white rounded-lg transition-colors font-medium disabled:opacity-40"
             >
               {isCheckingGov ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
-              <span className="text-sm">{isCheckingGov ? 'Checking...' : 'Check Governance'}</span>
+              <span className="text-sm">{isCheckingGov ? 'Checking...' : 'Check Content'}</span>
             </button>
           </div>
 
@@ -287,7 +315,7 @@ export function IntelligenceDashboard() {
                 <span className={`text-sm font-semibold ${
                   govResult.status === 'pass' ? 'text-green-300' : 'text-amber-300'
                 }`}>
-                  {govResult.status === 'pass' ? 'Content Approved' : 'Violations Found'}
+                  {govResult.status === 'pass' ? 'Content Looks Good' : 'Issues Found'}
                 </span>
               </div>
               {govResult.violations && govResult.violations.length > 0 && (
@@ -313,25 +341,25 @@ export function IntelligenceDashboard() {
             <p className="text-xs text-muted-foreground uppercase">Insights Found</p>
             <TrendingUp className="w-5 h-5 text-primary" />
           </div>
-          <p className="text-3xl font-bold gradient-text">{insights.length}</p>
+          <p className="text-3xl font-bold text-primary">{insights.length}</p>
         </div>
         <div className="glass rounded-xl p-6 border border-border/20">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-muted-foreground uppercase">Strategies Gen</p>
+            <p className="text-xs text-muted-foreground uppercase">Suggestions</p>
             <Zap className="w-5 h-5 text-accent" />
           </div>
           <p className="text-3xl font-bold text-accent">{strategy ? 1 : 0}</p>
         </div>
         <div className="glass rounded-xl p-6 border border-border/20">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-muted-foreground uppercase">Gov Checks</p>
+            <p className="text-xs text-muted-foreground uppercase">Brand Checks</p>
             <Shield className="w-5 h-5 text-secondary" />
           </div>
           <p className="text-3xl font-bold text-secondary">{govResult ? 1 : 0}</p>
         </div>
         <div className="glass rounded-xl p-6 border border-border/20">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-muted-foreground uppercase">Log Events</p>
+            <p className="text-xs text-muted-foreground uppercase">Activities</p>
             <Activity className="w-5 h-5 text-green-400" />
           </div>
           <p className="text-3xl font-bold text-green-400">{activityLog.length}</p>
